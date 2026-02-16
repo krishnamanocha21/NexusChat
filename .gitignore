@@ -1,0 +1,12 @@
+# Ignore sensitive folders
+node_modules/
+.env
+
+# Ignore OS-specific files
+ds_store
+thumbs.db
+desktop.ini
+
+# Ignore IDE settings
+.vscode/
+.idea/
