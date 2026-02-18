@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+//remember the reference to the schema always stores the mongodb userid in it
 const participantSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   role: { type: String, enum: ['admin', 'member'], default: 'member' },
@@ -16,6 +17,6 @@ const chatSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const Chat = mongoose.model('Chat', chatSchema);
-const Participant =mongoose.model('Participant',participantSchema);
 
-export {Participant ,Chat};
+
+export {Chat};

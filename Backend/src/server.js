@@ -33,6 +33,7 @@ connectDB()
     });
     */
 
+    initializeSocketIO(io);
     httpServer.on("error",(error)=>{
         console.log("Server error :",error);
         throw error;
