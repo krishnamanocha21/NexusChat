@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 const attachmentSchema = new mongoose.Schema({
   fileUrl: { type: String, required: true },
   fileType: { type: String },
+  //sample_image (or folder_name/sample_image ->public id
+  publicId: { type: String, required: true },
   fileSize: { type: Number }
 });
 
