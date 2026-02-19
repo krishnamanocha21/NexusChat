@@ -942,11 +942,9 @@ export const leaveGroupChat = asyncHandler(async (req, res) => {
 });
 
 export const makeGroupAdmin = asyncHandler(async (req, res) => {
-  // Assuming the route looks like: /api/chats/group/:chatId/admin/:participantId
   const { chatId, participantId } = req.params;
 
-  // 1. Validate both IDs to prevent MongoDB CastErrors
-  //thsi will convert the chatid to the hexadecimal format required
+  // 1. Validate both IDs
   if (!mongoose.Types.ObjectId.isValid(chatId) || !mongoose.Types.ObjectId.isValid(participantId)) {
     throw new ApiError(400, "Invalid Chat ID or Participant ID");
   }
@@ -954,56 +952,63 @@ export const makeGroupAdmin = asyncHandler(async (req, res) => {
   // 2. Fetch the chat
   const groupChat = await Chat.findById(chatId);
 
-  if (!groupChat) {
+  if (!groupChat || !groupChat.isGroupChat) {
     throw new ApiError(404, "Group chat does not exist");
   }
 
-  if (!groupChat.isGroupChat) {
-    throw new ApiError(400, "This is not a group chat");
-  }
-
-  // 3. Authorization: Only the current admin can hand over the role
-  if (groupChat.admin?.toString() !== req.user._id?.toString()) {
+  // 3. Authorization: Use 'groupAdmin' as defined in your schema
+  if (groupChat.groupAdmin?.toString() !== req.user._id?.toString()) {
     throw new ApiError(403, "Only the current admin can assign a new admin");
   }
 
-  // 4. Prevent unnecessary database calls if they select themselves
-  if (groupChat.admin?.toString() === participantId) {
+  // 4. Prevent self-selection
+  if (groupChat.groupAdmin?.toString() === participantId) {
     throw new ApiError(400, "You are already the admin of this group");
   }
 
-  // 5. Verify the target user is actually a participant in the group
+  // 5. Verify target user is a participant using the new object structure (p.user)
   const isParticipant = groupChat.participants.some(
-    (p) => p.toString() === participantId
+    (p) => p.user.toString() === participantId
   );
 
   if (!isParticipant) {
     throw new ApiError(400, "The user you are trying to make admin is not in this group");
   }
 
-  // 6. Update the admin field in the database
-  const updatedChat = await Chat.findByIdAndUpdate(
-    chatId,
-    {
-      $set: { admin: participantId },
+  
+
+  // 6. Update BOTH the groupAdmin field AND the participant's role using the positional operator ($)
+  const updatedChat = await Chat.findOneAndUpdate(
+    { 
+      _id: chatId, 
+      "participants.user": participantId // Match the specific user in the array
+    },
+    { 
+      $set: { 
+        groupAdmin: participantId,
+
+        /*MongoDB Positional Operator ($)
+        MongoDB needs to know which specific object inside that array needs to be updated.
+        The $ acts as a placeholder for the first element that matched your query criteria.
+        */
+        "participants.$.role": "admin" // Update their role inside the array
+      } 
     },
     { new: true }
   );
 
-  // 7. Fetch the new admin's name for the timeline message
+  // 7. System Timeline Message
   const newAdmin = await User.findById(participantId).select("name username");
   const identifier = newAdmin ? (newAdmin.username || newAdmin.name) : "a participant";
 
-  // 8. Create the System Timeline Message
   const systemMessage = await Message.create({
     senderId: req.user._id,
     chatId: chatId,
-    // Frontend will render: "Krishna made John the new admin"
     content: `made ${identifier} the new admin`, 
     status: [{ userId: req.user._id, status: 'sent' }]
   });
 
-  // 9. Aggregate to get the fully populated chat payload (avatars, names, etc.)
+  // 8. Aggregate payload
   const chat = await Chat.aggregate([
     {
       $match: {
@@ -1019,14 +1024,13 @@ export const makeGroupAdmin = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Internal server error while fetching updated chat");
   }
 
-  // 10. Socket Events Broadcast
+  // 9. Socket Events Broadcast
   payload.participants?.forEach((participant) => {
-    const pId = participant._id?.toString();
+    // Depending on your chatCommonAggregation, participant might be fully populated.
+    // Ensure we are grabbing the correct nested ID format here.
+    const pId = participant.user?._id ? participant.user._id.toString() : participant.user?.toString();
     
-    // Update the UI so the "Admin" badge moves to the new user in the member list
     emitSocketEvent(req, pId, ChatEventEnum.UPDATE_GROUP_EVENT, payload);
-    
-    // Drop the system message into the chat window instantly
     emitSocketEvent(req, pId, ChatEventEnum.MESSAGE_RECEIVED_EVENT, systemMessage);
   });
 
@@ -1035,3 +1039,109 @@ export const makeGroupAdmin = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, payload, "Admin rights transferred successfully"));
 });
 
+export const demoteGroupAdmin = asyncHandler(async (req, res) => {
+  const { chatId, participantId } = req.params;
+  const requesterId = req.user._id.toString();
+
+  // 1. Validate both ObjectIds
+  if (!mongoose.Types.ObjectId.isValid(chatId) || !mongoose.Types.ObjectId.isValid(participantId)) {
+    throw new ApiError(400, "Invalid Chat ID or Participant ID");
+  }
+
+  // 2. Fetch the chat
+  const groupChat = await Chat.findById(chatId);
+
+  if (!groupChat || !groupChat.isGroupChat) {
+    throw new ApiError(404, "Group chat does not exist or is not a group");
+  }
+
+  // 3. Authorization: Verify the requester is an admin
+  const requester = groupChat.participants.find(
+    (p) => p.user.toString() === requesterId
+  );
+
+  if (!requester || requester.role !== 'admin') {
+    throw new ApiError(403, "Only admins can modify admin roles");
+  }
+
+  // 4. Target Validation: Verify the target is in the group and is currently an admin
+  const targetParticipant = groupChat.participants.find(
+    (p) => p.user.toString() === participantId
+  );
+
+  if (!targetParticipant) {
+    throw new ApiError(400, "This user is not a participant in this chat");
+  }
+
+  if (targetParticipant.role !== 'admin') {
+    throw new ApiError(400, "This user is not currently an admin");
+  }
+
+ 
+  // Prevent demoting the primary creator
+  if (groupChat.groupAdmin?.toString() === participantId) {
+    throw new ApiError(400, "Cannot demote the primary group creator");
+  }
+
+  // Prevent demoting the last remaining admin
+  const adminCount = groupChat.participants.filter(p => p.role === 'admin').length;
+  if (adminCount <= 1) {
+    throw new ApiError(400, "Cannot demote the only admin. Assign a new admin first.");
+  }
+
+  // 6. Database Update: Change the specific participant's role back to 'member'
+  const updatedChat = await Chat.findOneAndUpdate(
+    { 
+      _id: chatId, 
+      "participants.user": participantId // Pinpoint the exact user in the array
+    },
+    {
+      $set: { "participants.$.role": "member" }, // The $ updates only the matched index
+    },
+    { new: true }
+  );
+
+  // 7. Fetch the demoted user's name for the timeline message
+  const demotedAdmin = await User.findById(participantId).select("name username");
+  const identifier = demotedAdmin ? (demotedAdmin.username || demotedAdmin.name) : "a participant";
+
+  // 8. Create the System Timeline Message
+  const systemMessage = await Message.create({
+    senderId: req.user._id,
+    chatId: chatId,
+    content: `removed ${identifier} as an admin`, 
+    status: [{ userId: req.user._id, status: 'sent' }]
+  });
+
+  // 9. Aggregate the fully populated chat payload
+  const chat = await Chat.aggregate([
+    {
+      $match: {
+        _id: updatedChat._id,
+      },
+    },
+    ...chatCommonAggregation(),
+  ]);
+
+  const payload = chat[0];
+
+  if (!payload) {
+    throw new ApiError(500, "Internal server error while fetching updated chat");
+  }
+
+  
+  payload.participants?.forEach((p) => {
+    // Assuming chatCommonAggregation populates the 'user' object
+    const pId = p.user?._id ? p.user._id.toString() : p.user?.toString();
+    
+    // Update the UI to remove the "Admin" badge
+    emitSocketEvent(req, pId, ChatEventEnum.UPDATE_GROUP_EVENT, payload);
+    
+    // Drop the system message into the active chat window
+    emitSocketEvent(req, pId, ChatEventEnum.MESSAGE_RECEIVED_EVENT, systemMessage);
+  });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, payload, "Admin demoted successfully"));
+});
