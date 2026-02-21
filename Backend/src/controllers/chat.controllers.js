@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { v2 as cloudinary } from "cloudinary";
+import { uploadOnCloudinary, deleteFromCloudinary,deleteBatchFromCloudinary } from "../utils/cloudinary.js";
 import { ApiError } from "../utils/ApiError.js";
 import { emitSocketEvent } from "../socket/index.js";
 import { ChatEventEnum } from "../constants.js";
@@ -268,9 +269,12 @@ export const createOrGetOneOnOneChat = asyncHandler(
 );
 
 export const createAGroupChat = asyncHandler(async (req, res) => {
-  const { chatName, participants } = req.body; // Using 'chatName' as per schema
+  const { chatName, participants, description } = req.body; // Using 'chatName' as per schema
 
   // 1. Validation: Ensure the creator isn't in the provided participants array
+  if (!chatName || chatName.trim() === "") {
+    throw new ApiError(400, "Group name is required");
+  }
   if (participants.includes(req.user._id.toString())) {
     throw new ApiError(
       400,
@@ -309,6 +313,7 @@ export const createAGroupChat = asyncHandler(async (req, res) => {
   const groupChat = await Chat.create({
     chatName: chatName || "New Group",
     isGroupChat: true,
+    description: description ? description.trim() : "",
     participants: participantsData,
     groupAdmin: req.user._id,
   });
@@ -336,8 +341,8 @@ export const createAGroupChat = asyncHandler(async (req, res) => {
 
   // 6. Socket Logic: Notify all participants (except the creator)
   payload?.participants?.forEach((participant) => {
-    if (participant.user._id.tostring() === req.user._id.tostring())
-      return;
+    if (participant.user._id.tostring() === req.user._id.tostring())return;
+      
 
     emitSocketEvent(
       req,
@@ -1113,7 +1118,7 @@ export const demoteGroupAdmin = asyncHandler(async (req, res) => {
     status: [{ userId: req.user._id, status: 'sent' }]
   });
 
-  // 9. Aggregate the fully populated chat payload
+  
   const chat = await Chat.aggregate([
     {
       $match: {
@@ -1145,3 +1150,5 @@ export const demoteGroupAdmin = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, payload, "Admin demoted successfully"));
 });
+
+

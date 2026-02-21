@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* Enables manual dark mode toggling. 
+   Adding the 'dark' class to your <html> tag will activate this. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary: #7bc0e3;         /* Main light blue from the UI mockup */
+  --color-primary-hover: #6aa9c9;   /* Slightly darker blue for button hovers */
+  --color-background-dark: #222222; /* Sleek dark mode background */
+  --color-background-light: #f0f8ff; /* Clean light mode background */
+}
+
+/*@layer keyword controls the order and priority of your CSS.*/
+@layer base {
+  body {
+    @apply bg-background-light text-gray-900;
+    @apply transition-colors duration-300; /* Smooth fading when toggling themes */
+  }
+
+  .dark body {
+    @apply bg-background-dark text-white;
+  }
+}
