@@ -99,7 +99,7 @@ const AuthPage: React.FC = () => {
                 style={{ backgroundColor: brandLime }}
                 className="text-black font-bold px-12 py-3 rounded-full hover:brightness-110 active:scale-95 transition-all shadow-lg"
               >
-                SIGN IN
+                SIGN UP
               </button>
             </div>
 
@@ -116,7 +116,7 @@ const AuthPage: React.FC = () => {
                 style={{ backgroundColor: brandLime }}
                 className="text-black font-bold px-12 py-3 rounded-full hover:brightness-110 active:scale-95 transition-all shadow-lg"
               >
-                SIGN UP
+                SIGN IN
               </button>
             </div>
           </div>

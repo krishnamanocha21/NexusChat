@@ -126,6 +126,10 @@ export const logoutUser = asyncHandler(async(req, res) => {
         },
         {
             new:true
+        },
+        {
+            // 🚩 THE FIX: Replace 'new: true' with this
+            returnDocument: 'after' 
         }
     )
 

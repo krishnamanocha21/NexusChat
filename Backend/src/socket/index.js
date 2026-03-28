@@ -28,8 +28,6 @@ const mountTypingEvents = (socket) => {
   });
 
   socket.on(ChatEventEnum.STOP_TYPING_EVENT, (chatId) => {
-    //for socket.in-> It tells the server: "Look at the room named chatId, but exclude the person who just sent this signal".
-    //emit -> This is the "Broadcast." that the krishna is typing message or animation
     socket.in(chatId).emit(ChatEventEnum.STOP_TYPING_EVENT, chatId);
   });
 };
@@ -47,47 +45,64 @@ const mountTypingEvents = (socket) => {
 export const emitSocketEvent = (req, roomId, event, payload) => {
   req.app.get("io").in(roomId).emit(event, payload);
 };
+// 1. Create a global set of online users
+//set like in dsa
+const onlineUsers = new Set(); 
 
 export const initializeSocketIO = (io) => {
-  return io.on("connection", async (socket) => {
+  // 1. AUTH MIDDLEWARE: Stop unauthenticated users at the door
+  io.use(async (socket, next) => {
     try {
-      const cookies = cookie.parse(socket.handshake.headers?.cookie || "");
-      let token = cookies?.accessToken;
+      const cookies = cookie.parse(socket.handshake.headers.cookie || "");
+      const token = cookies?.accessToken || socket.handshake.auth?.token;
 
       if (!token) {
-          // Fallback for tools like Postman/Hopper
-          token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.replace("Bearer ", "");
+        return next(new Error("Authentication error: Token not found"));
       }
 
-      if (!token) throw new ApiError(401, "Unauthenticated socket connection");
-
       const decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-      const user = await User.findById(decodedToken?._id).select("-password -refreshToken");
+      const user = await User.findById(decodedToken?._id).select("-password");
 
-      if (!user) throw new ApiError(401, "User not found");
+      if (!user) {
+        return next(new Error("Authentication error: User not found"));
+      }
 
-      // Store the user on the socket object for easy access later
-      socket.user = user;
+      socket.user = user; // 🚩 Attach user to socket for use below
+      next();
+    } catch (error) {
+      next(new Error("Authentication error"));
+    }
+  });
 
-      // 1. Join a personal room based on User ID
-      // This is vital for emitSocketEvent(req, participantId, ...) to work!
-      socket.join(user._id.toString());
-      console.log(`⚡ User Connected: ${user.username} (ID: ${user._id})`);
+  // 2. CONNECTION HANDLER
+  return io.on("connection", async (socket) => {
+    try {
+      const userId = socket.user._id.toString();
+      
+      // Join personal room for 1-on-1 messages
+      socket.join(userId); 
+      onlineUsers.add(userId);
+      
+      // Syncing status: Send current list to user & notify others
+      socket.emit("ONLINE_USERS_LIST", Array.from(onlineUsers));
+      socket.broadcast.emit("USER_ONLINE_STATUS", { userId, isOnline: true });
 
-      // 2. MOUNT THE EVENTS (Actually use your variables!)
+      // Mount your event listeners
       mountJoinChatEvent(socket);
       mountTypingEvents(socket);
 
-      socket.on("disconnect", () => {
-        console.log(`👋 User Disconnected: ${user._id}`);
-      });
+      console.log(`⚡ User Online: ${socket.user.username}`);
 
+      socket.on("disconnect", () => {
+        onlineUsers.delete(userId);
+        io.emit("USER_ONLINE_STATUS", { userId, isOnline: false });
+        console.log(`👋 User Offline: ${userId}`);
+      });
     } catch (error) {
-      console.log("Socket Auth Error:", error.message);
+      console.error("Socket Logic Error:", error.message);
       socket.disconnect(true);
     }
   });
 };
-
 //why we are storing them in the variabel?
 //We wrap them in variables so we can neatly "mount" them inside the main io.on("connection") block without making the code a messy wall of text.

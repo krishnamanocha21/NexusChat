@@ -14,7 +14,7 @@ export const register = (data: any) => API.post('/users/register', data);
 export const fetchAllUsers = () => API.get('/users/all-users');
 
 // 2. Fetch existing conversations (The "Inbox/Sidebar")
-export const fetchUserChats = () => API.get('/chats');
+export const fetchUserChats = () => API.get("/chats", { withCredentials: true });
 
 // Change this from .post('/chats', { receiverId }) 
 // to a URL parameter based on your controller's req.params
@@ -26,3 +26,14 @@ export const getMessages = (chatId: string) => API.get(`/messages/${chatId}`);
 
 export const sendMessage = (chatId: string, content: string) => 
   API.post(`/messages/${chatId}`, { content });
+
+export const logoutUser = () => API.post('/users/logout', {}, { withCredentials: true });
+
+export const createAGroupChat = (data: { 
+  chatName: string; 
+  participants: string[]; 
+  description?: string 
+}) => {
+  return API.post("/chats/group", data, { withCredentials: true });
+};
+

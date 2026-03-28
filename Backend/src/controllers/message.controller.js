@@ -89,9 +89,15 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
   // Socket emission logic...
   selectedChat.participants.forEach((participant) => {
+    //double message error
+    // 🚩 THE FIX: Do not emit the socket event to the person who sent it!
+    // We convert both to strings to ensure they compare correctly
+    if (participant.user.toString() === req.user._id.toString()) return;
+
+    // Only emit to the OTHER participants
     emitSocketEvent(
       req,
-      participant.user.toString(),
+      participant.user.toString(), // Send to the user's specific room
       ChatEventEnum.MESSAGE_RECEIVED_EVENT,
       receivedMessage
     );
