@@ -1,34 +1,136 @@
-import { Message } from "../models/message.model.js"; // Adjust path as needed
+import mongoose from "mongoose";
 import { Chat } from "../models/chat.model.js";
+import { Message } from "../models/message.model.js";
+import { ChatEventEnum } from "../constants.js";
+import { emitSocketEvent } from "../socket/index.js";
+import { ApiError } from "../utils/ApiError.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
+/**
+ * @description Utility to get common message aggregation stages
+ */
+const chatMessageCommonAggregation = () => {
+  return [
+    {
+      $lookup: {
+        from: "users",
+        localField: "sender",
+        foreignField: "_id",
+        as: "sender",
+        pipeline: [
+          {
+            $project: {
+              username: 1,
+              profileUrl: 1,
+              fullName: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        sender: { $first: "$sender" },
+      },
+    },
+  ];
+};
 
-
-
-const getChatMessages = async (req, res) => {
+export const sendMessage = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
+  const { content } = req.body;
 
-  // 1. Check if chat exists
-  const chat = await Chat.findById(chatId);
-  if (!chat) {
-    return res.status(404).json({ message: "Chat not found" });
+  if (!content) {
+    throw new ApiError(400, "Message content is required");
   }
 
-  // 2. Execute Aggregation
+  const selectedChat = await Chat.findById(chatId);
+  if (!selectedChat) {
+    throw new ApiError(404, "Chat does not exist");
+  }
+
+  // --- THE FIX IS HERE ---
+  // Change 'sender' to 'senderId' and 'chat' to 'chatId'
+  const message = await Message.create({
+    senderId: req.user._id, // Matches your schema
+    chatId: new mongoose.Types.ObjectId(chatId), // Matches your schema
+    content: content,
+  });
+  // -----------------------
+
+  // Update the Chat's latest message
+  await Chat.findByIdAndUpdate(chatId, {
+    $set: { latestMessage: message._id },
+  });
+
+  // Since we changed the field names, we must also update the Aggregation!
   const messages = await Message.aggregate([
     {
       $match: {
-        chatId: new mongoose.Types.ObjectId(chatId),
-        isDeleted: false, // Only show non-deleted messages
+        _id: new mongoose.Types.ObjectId(message._id),
       },
     },
-    ...chatMessageCommonAggregation(), // Spread the aggregation stages here
     {
-      $sort: { createdAt: 1 }, // Order by time (oldest to newest)
+      $lookup: {
+        from: "users",
+        localField: "senderId", // Updated to match
+        foreignField: "_id",
+        as: "sender",
+        pipeline: [
+          { $project: { username: 1, profileUrl: 1, fullName: 1 } },
+        ],
+      },
     },
+    { $addFields: { sender: { $first: "$sender" } } },
   ]);
 
-  return res.status(200).json({
-    success: true,
-    data: messages,
+  const receivedMessage = messages[0];
+
+  // Socket emission logic...
+  selectedChat.participants.forEach((participant) => {
+    emitSocketEvent(
+      req,
+      participant.user.toString(),
+      ChatEventEnum.MESSAGE_RECEIVED_EVENT,
+      receivedMessage
+    );
   });
-};
+
+  return res.status(201).json(new ApiResponse(201, receivedMessage, "Message sent"));
+});
+
+export const getChatMessages = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(chatId)) {
+    throw new ApiError(400, "Invalid Chat ID");
+  }
+
+  const selectedChat = await Chat.findById(chatId);
+
+  if (!selectedChat) {
+    throw new ApiError(404, "Chat does not exist");
+  }
+
+  // Execute aggregation to fetch history
+  // ... inside getChatMessages
+const messages = await Message.aggregate([
+  {
+    $match: {
+      // 🚩 CHANGE THIS: Your Atlas screenshot shows 'chatId'
+      chatId: new mongoose.Types.ObjectId(chatId), 
+    },
+  },
+  ...chatMessageCommonAggregation(),
+  {
+    $sort: { createdAt: 1 },
+  },
+]);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, messages || [], "Messages fetched successfully")
+    );
+});

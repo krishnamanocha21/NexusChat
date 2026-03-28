@@ -14,15 +14,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   //Establishing the Connection (useEffect)
   useEffect(() => {
     // Replace with your backend URL
-    const newSocket = io('http://localhost:4000', {
-      withCredentials: true,
-    });
+    const Socket = io("http://localhost:4000", {
+  withCredentials: true, // 👈 CRITICAL: This sends your cookies to the socket server
+  transports: ["websocket", "polling"], 
+});
     
-    setSocket(newSocket);
+    setSocket(Socket);
 
     //The Cleanup (Return Function): newSocket.close() is vital. If the user logs out or the app closes, this "hangs up the phone." Without this, you would leave "ghost connections" on your server, eventually crashing i
     return () => {
-      newSocket.close();
+      Socket.close();
     };
   }, []);
 

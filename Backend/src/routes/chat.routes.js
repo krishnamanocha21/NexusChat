@@ -4,7 +4,8 @@ import {verifyJWT} from "../middleware/auth.middleware.js";
 
 const router = Router();
 
-router.route("/").post(verifyJWT, createOrGetOneOnOneChat); // Access or Create Chat
+// This MUST match the frontend: path is "/c/:receiverId" and method is .post
+router.route("/c/:receiverId").post(verifyJWT, createOrGetOneOnOneChat);
 router.route("/").get(verifyJWT, getUserChats);
 
 export default router;

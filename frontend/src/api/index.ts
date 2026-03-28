@@ -18,7 +18,11 @@ export const fetchUserChats = () => API.get('/chats');
 
 // Change this from .post('/chats', { receiverId }) 
 // to a URL parameter based on your controller's req.params
+// Ensure it is .post and the URL matches your backend route exactly
 export const createOrGetChat = (receiverId: string) => API.post(`/chats/c/${receiverId}`);
 
 // 4. Get messages for a specific chat (Your current code, just ensuring it matches)
 export const getMessages = (chatId: string) => API.get(`/messages/${chatId}`);
+
+export const sendMessage = (chatId: string, content: string) => 
+  API.post(`/messages/${chatId}`, { content });
