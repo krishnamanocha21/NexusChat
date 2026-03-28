@@ -1,9 +1,13 @@
+import jwt from "jsonwebtoken";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import jwt from "jsonwebtoken"
-import User  from "../models/user.model.js" 
+import {User}  from "../models/user.model.js" 
 
 export const verifyJWT = asyncHandler(async(req, res, next) => {
+    console.log("--- New Request Received ---");
+    console.log("Header Token:", req.header("Authorization")?.replace("Bearer ", ""));
+    console.log("Cookies Object:", req.cookies); // Is this undefined?
+    console.log("Access Token from Cookie:", req.cookies?.accessToken);
     try {
         
         const token = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")

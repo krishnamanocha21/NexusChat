@@ -1,19 +1,23 @@
 import dotenv from 'dotenv';
+dotenv.config({
+    path: path.resolve(process.cwd(), '.env')
+});
+console.log("DEBUG: CORS_ORIGIN is ->", process.env.CORS_ORIGIN);
+console.log("DEBUG: PORT is ->", process.env.PORT);
+
 import connectDB from './db/db.js'
 import app from "./app.js"
 import path from 'path';
 import {createServer} from  "http";
 import { Server } from "socket.io";
-
-dotenv.config({
-    path: path.resolve(process.cwd(), '.env')
-});
+import { initializeSocketIO } from "./socket/index.js";
 
 const httpServer =createServer(app);
 const io =new Server(httpServer,{
     pingTimeout:60000,
     cors:{
-        origin:process.env.CORS_ORIGIN,
+        origin: "http://localhost:5174", // Replace with  React/Vite port
+    methods: ["GET", "POST"],
         credentials:true,
     },
 });

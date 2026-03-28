@@ -1,6 +1,6 @@
 import { Chat } from "../models/chat.model.js";
 import { Message } from "../models/message.model.js";
-import { User } from "../models/user.model.js";
+
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { v2 as cloudinary } from "cloudinary";
@@ -9,7 +9,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { emitSocketEvent } from "../socket/index.js";
 import { ChatEventEnum } from "../constants.js";
 import mongoose from "mongoose";
-
+import { User } from "../models/user.model.js";
 /*
 * @description Utility function which returns the pipeline stages to structure the chat schema with common lookups
 * @returns {mongoose.PipelineStage[]}
@@ -341,7 +341,7 @@ export const createAGroupChat = asyncHandler(async (req, res) => {
 
   // 6. Socket Logic: Notify all participants (except the creator)
   payload?.participants?.forEach((participant) => {
-    if (participant.user._id.tostring() === req.user._id.tostring())return;
+    if (participant.user._id.toString() === req.user._id.toString())return;
       
 
     emitSocketEvent(
@@ -559,7 +559,7 @@ export const getGroupChatDetails =asyncHandler(async(req,res)=>{
 
 export const renameGroupChat =asyncHandler(async (req,res)=>{
     const { chatId } = req.params;
-    const { name } = req.body;//input
+    const { chatName } = req.body;
 
     // 1. Validate Input
   if (!name || name.trim() === "") {
@@ -1151,4 +1151,21 @@ export const demoteGroupAdmin = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, payload, "Admin demoted successfully"));
 });
 
+//Show a list of all conversations the user is part of.
+export const getUserChats = asyncHandler(async (req, res) => {
+    const chats = await Chat.aggregate([
+        {
+            $match: {
+                participants: { $elemMatch: { $eq: req.user._id } },
+            },
+        },
+        {
+            $sort: { updatedAt: -1 },
+        },
+        ...chatCommonAggregation(), // Your existing pipeline helper
+    ]);
 
+    return res.status(200).json(
+        new ApiResponse(200, chats || [], "User chats fetched successfully")
+    );
+});

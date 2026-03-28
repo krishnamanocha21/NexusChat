@@ -4,6 +4,7 @@ import {
     loginUser,
     logoutUser,
     getCurrentUser,
+    getAllUsers,
 }from "../controllers/user.controller.js"
 import { verifyJWT } from "../middleware/auth.middleware.js";
 
@@ -14,6 +15,6 @@ router.route("/register").post(registerUser);
 router.route("/login").post(loginUser);
 router.route("/logout").post(verifyJWT ,logoutUser);
 router.route("/current-user").get(verifyJWT,getCurrentUser);
-
+router.route("/all-users").get(verifyJWT, getAllUsers);
 
 export default router;

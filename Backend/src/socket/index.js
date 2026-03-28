@@ -2,7 +2,7 @@
 import cookie from "cookie";
 import jwt from "jsonwebtoken";
 import { ChatEventEnum } from "../constants.js";
-import User from "../models/user.model.js";
+import {User} from "../models/user.model.js";
 import {ApiError} from "../utils/ApiError.js";
 
 /**
@@ -44,10 +44,50 @@ const mountTypingEvents = (socket) => {
  * @param {any} payload - Data that should be sent when emitting the event
  * @description Utility function responsible to abstract the logic of socket emission via the io instance
  */
-const emitSocketEvent = (req, roomId, event, payload) => {
+export const emitSocketEvent = (req, roomId, event, payload) => {
   req.app.get("io").in(roomId).emit(event, payload);
 };
 
+export const initializeSocketIO = (io) => {
+  return io.on("connection", async (socket) => {
+    try {
+      const cookies = cookie.parse(socket.handshake.headers?.cookie || "");
+      let token = cookies?.accessToken;
+
+      if (!token) {
+          // Fallback for tools like Postman/Hopper
+          token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.replace("Bearer ", "");
+      }
+
+      if (!token) throw new ApiError(401, "Unauthenticated socket connection");
+
+      const decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+      const user = await User.findById(decodedToken?._id).select("-password -refreshToken");
+
+      if (!user) throw new ApiError(401, "User not found");
+
+      // Store the user on the socket object for easy access later
+      socket.user = user;
+
+      // 1. Join a personal room based on User ID
+      // This is vital for emitSocketEvent(req, participantId, ...) to work!
+      socket.join(user._id.toString());
+      console.log(`⚡ User Connected: ${user.username} (ID: ${user._id})`);
+
+      // 2. MOUNT THE EVENTS (Actually use your variables!)
+      mountJoinChatEvent(socket);
+      mountTypingEvents(socket);
+
+      socket.on("disconnect", () => {
+        console.log(`👋 User Disconnected: ${user._id}`);
+      });
+
+    } catch (error) {
+      console.log("Socket Auth Error:", error.message);
+      socket.disconnect(true);
+    }
+  });
+};
 
 //why we are storing them in the variabel?
 //We wrap them in variables so we can neatly "mount" them inside the main io.on("connection") block without making the code a messy wall of text.
