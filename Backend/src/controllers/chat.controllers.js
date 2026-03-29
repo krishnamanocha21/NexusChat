@@ -1156,13 +1156,19 @@ export const getUserChats = asyncHandler(async (req, res) => {
     const chats = await Chat.aggregate([
         {
             $match: {
-                participants: { $elemMatch: { $eq: req.user._id } },
+                // 🚩 FIX 1: Look inside the 'user' field of the participants array
+                // 🚩 FIX 2: Convert req.user._id to a MongoDB ObjectId
+                participants: { 
+                    $elemMatch: { 
+                        user: new mongoose.Types.ObjectId(req.user._id) 
+                    } 
+                },
             },
         },
         {
             $sort: { updatedAt: -1 },
         },
-        ...chatCommonAggregation(), // Your existing pipeline helper
+        ...chatCommonAggregation(), 
     ]);
 
     return res.status(200).json(

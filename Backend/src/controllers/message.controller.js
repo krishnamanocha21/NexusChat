@@ -15,7 +15,7 @@ const chatMessageCommonAggregation = () => {
     {
       $lookup: {
         from: "users",
-        localField: "sender",
+        localField: "senderId", // 🚩 FIXED: Matches your schema field name
         foreignField: "_id",
         as: "sender",
         pipeline: [
@@ -50,60 +50,51 @@ export const sendMessage = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Chat does not exist");
   }
 
-  // --- THE FIX IS HERE ---
-  // Change 'sender' to 'senderId' and 'chat' to 'chatId'
+  // 1. Create the message
   const message = await Message.create({
-    senderId: req.user._id, // Matches your schema
-    chatId: new mongoose.Types.ObjectId(chatId), // Matches your schema
+    senderId: req.user._id,
+    chatId: new mongoose.Types.ObjectId(chatId),
     content: content,
   });
-  // -----------------------
 
-  // Update the Chat's latest message
+  // 2. Update the Chat's latest message pointer
   await Chat.findByIdAndUpdate(chatId, {
     $set: { latestMessage: message._id },
   });
 
-  // Since we changed the field names, we must also update the Aggregation!
+  // 3. Aggregate the message to get the sender details (Full Object)
   const messages = await Message.aggregate([
     {
       $match: {
         _id: new mongoose.Types.ObjectId(message._id),
       },
     },
-    {
-      $lookup: {
-        from: "users",
-        localField: "senderId", // Updated to match
-        foreignField: "_id",
-        as: "sender",
-        pipeline: [
-          { $project: { username: 1, profileUrl: 1, fullName: 1 } },
-        ],
-      },
-    },
-    { $addFields: { sender: { $first: "$sender" } } },
+    ...chatMessageCommonAggregation(), // Use the fixed helper here
   ]);
 
   const receivedMessage = messages[0];
 
-  // Socket emission logic...
+  if (!receivedMessage) {
+    throw new ApiError(500, "Internal server error during message aggregation");
+  }
+
+  // 4. Socket emission logic
   selectedChat.participants.forEach((participant) => {
-    //double message error
-    // 🚩 THE FIX: Do not emit the socket event to the person who sent it!
-    // We convert both to strings to ensure they compare correctly
+    // 🚩 Do not emit to the sender (they already have the message in UI)
     if (participant.user.toString() === req.user._id.toString()) return;
 
-    // Only emit to the OTHER participants
+    // Emit to each participant's individual room
     emitSocketEvent(
       req,
-      participant.user.toString(), // Send to the user's specific room
+      participant.user.toString(),
       ChatEventEnum.MESSAGE_RECEIVED_EVENT,
       receivedMessage
     );
   });
 
-  return res.status(201).json(new ApiResponse(201, receivedMessage, "Message sent"));
+  return res
+    .status(201)
+    .json(new ApiResponse(201, receivedMessage, "Message sent successfully"));
 });
 
 export const getChatMessages = asyncHandler(async (req, res) => {
@@ -114,29 +105,23 @@ export const getChatMessages = asyncHandler(async (req, res) => {
   }
 
   const selectedChat = await Chat.findById(chatId);
-
   if (!selectedChat) {
     throw new ApiError(404, "Chat does not exist");
   }
 
-  // Execute aggregation to fetch history
-  // ... inside getChatMessages
-const messages = await Message.aggregate([
-  {
-    $match: {
-      // 🚩 CHANGE THIS: Your Atlas screenshot shows 'chatId'
-      chatId: new mongoose.Types.ObjectId(chatId), 
+  const messages = await Message.aggregate([
+    {
+      $match: {
+        chatId: new mongoose.Types.ObjectId(chatId), // Matches schema field
+      },
     },
-  },
-  ...chatMessageCommonAggregation(),
-  {
-    $sort: { createdAt: 1 },
-  },
-]);
+    ...chatMessageCommonAggregation(), // Join user details
+    {
+      $sort: { createdAt: 1 }, // Oldest first for chat flow
+    },
+  ]);
 
   return res
     .status(200)
-    .json(
-      new ApiResponse(200, messages || [], "Messages fetched successfully")
-    );
+    .json(new ApiResponse(200, messages || [], "Messages fetched successfully"));
 });
