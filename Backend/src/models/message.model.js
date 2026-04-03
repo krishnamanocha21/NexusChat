@@ -25,6 +25,7 @@ const messageSchema = new mongoose.Schema({
   content: { type: String ,trim:true },
   pinned: { type: Boolean, default: false },
   replyTo: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' }, // Self-reference
+  deletedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   isDeleted: { type: Boolean, default: false },
   attachments: [attachmentSchema],
   reactions: [reactionSchema],

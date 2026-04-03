@@ -112,16 +112,67 @@ export const getChatMessages = asyncHandler(async (req, res) => {
   const messages = await Message.aggregate([
     {
       $match: {
-        chatId: new mongoose.Types.ObjectId(chatId), // Matches schema field
+        chatId: new mongoose.Types.ObjectId(chatId),
+        // 🟢 THE FIX: Exclude messages where my ID is in the deletedBy array
+        deletedBy: { 
+          $ne: new mongoose.Types.ObjectId(req.user._id) 
+        },
       },
     },
-    ...chatMessageCommonAggregation(), // Join user details
+    ...chatMessageCommonAggregation(), // Joining user details
     {
-      $sort: { createdAt: 1 }, // Oldest first for chat flow
+      $sort: { createdAt: 1 },
     },
   ]);
 
   return res
     .status(200)
     .json(new ApiResponse(200, messages || [], "Messages fetched successfully"));
+});
+
+export const deleteMessage = asyncHandler(async (req, res) => {
+  const { chatId, messageId } = req.params;
+  const { deleteType } = req.body;
+
+  const message = await Message.findById(messageId);
+  if (!message) throw new ApiError(404, "Message not found");
+
+  if (deleteType === "everyone") {
+    // 🚩 Check if requester is the sender
+    if (message.senderId.toString() !== req.user._id.toString()) {
+      throw new ApiError(403, "You can only delete your own messages for everyone");
+    }
+
+    // Soft delete logic
+    message.isDeleted = true;
+    message.content = "This message was deleted"; 
+    // Clear attachments if any, to save space/privacy
+    message.attachments = []; 
+    await message.save();
+
+    // Notify others in the chat room
+    emitSocketEvent(req, chatId, ChatEventEnum.MESSAGE_DELETE_EVENT, messageId);
+
+  } else {
+    // 🚩 "Delete for me" logic
+    // Ensure the array exists (fallback for old messages)
+    if (!message.deletedBy) message.deletedBy = [];
+
+    // Only push if not already deleted
+    if (!message.deletedBy.includes(req.user._id)) {
+      message.deletedBy.push(req.user._id);
+      await message.save();
+    }
+  }
+
+  emitSocketEvent(
+  req, 
+  chatId, 
+  ChatEventEnum.MESSAGE_DELETE_EVENT, 
+  messageId // Sending the ID to the frontend
+);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "Message deleted successfully"));
 });

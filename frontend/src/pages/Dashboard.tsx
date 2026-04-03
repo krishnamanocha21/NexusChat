@@ -10,8 +10,11 @@ import {
   Send,
   Search,
   Video,
+  ChevronDown,
+  Trash2,
   MoreVertical,
   Plus,
+  Ban,
   Mic,
   CheckCheck,
   LogOut,
@@ -25,6 +28,7 @@ import {
   sendMessage,
   logoutUser as apiLogout,
   createAGroupChat,
+  deleteMessage,
 } from '../api';
 import { ChatEventEnum } from '../constants';
 import { useNavigate } from 'react-router-dom';
@@ -47,6 +51,9 @@ const Dashboard: React.FC = () => {
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>(
     [],
   );
+
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [isNewChatView, setIsNewChatView] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]); // To store everyone for searching
   const [recentChats, setRecentChats] = useState<any[]>([]); // To store history
 
@@ -89,25 +96,25 @@ const Dashboard: React.FC = () => {
   }, []);
 
   // Requirement: Handle being added to a new group or starting a new chat
-useEffect(() => {
-  if (!socket) return;
+  useEffect(() => {
+    if (!socket) return;
 
-  const handleNewChat = (newChat: any) => {
-    setRecentChats((prev) => {
-      // Prevent duplicates if the user is already looking at the list
-      if (prev.find((chat) => chat._id === newChat._id)) return prev;
-      
-      // Add the new group to the top of the sidebar
-      return [newChat, ...prev];
-    });
-  };
+    const handleNewChat = (newChat: any) => {
+      setRecentChats((prev) => {
+        // Prevent duplicates if the user is already looking at the list
+        if (prev.find((chat) => chat._id === newChat._id)) return prev;
 
-  socket.on(ChatEventEnum.NEW_CHAT_EVENT, handleNewChat);
+        // Add the new group to the top of the sidebar
+        return [newChat, ...prev];
+      });
+    };
 
-  return () => {
-    socket.off(ChatEventEnum.NEW_CHAT_EVENT, handleNewChat);
-  };
-}, [socket]);
+    socket.on(ChatEventEnum.NEW_CHAT_EVENT, handleNewChat);
+
+    return () => {
+      socket.off(ChatEventEnum.NEW_CHAT_EVENT, handleNewChat);
+    };
+  }, [socket]);
 
   useEffect(() => {
     if (selectedChat) {
@@ -124,45 +131,70 @@ useEffect(() => {
     }
   }, [selectedChat, socket]);
 
-// Requirement #1: Fixed Live Message Updates
-useEffect(() => {
+  useEffect(() => {
   if (!socket) return;
 
-  const handleIncomingMessage = (newMsg: any) => {
-    const incomingChatId = newMsg.chatId || newMsg.chat?._id || newMsg.chat;
-
-    // 1. Update the message window if this chat is open
-    setMessages((prev) => {
-      if (selectedChat?._id === incomingChatId) {
-        const isAlreadyPresent = prev.some((m) => m._id === newMsg._id);
-        if (isAlreadyPresent) return prev;
-        return [...prev, newMsg];
-      }
-      return prev;
-    });
-
-    // 2. Update the sidebar preview and move it to the top
-    setRecentChats((prev) => {
-      const chatIndex = prev.findIndex((c) => c._id === incomingChatId);
-
-      if (chatIndex !== -1) {
-        const updatedChat = { 
-          ...prev[chatIndex], 
-          latestMessage: newMsg, 
-          updatedAt: new Date().toISOString() 
-        };
-        const otherChats = prev.filter((_, index) => index !== chatIndex);
-        return [updatedChat, ...otherChats];
-      }
-      return prev; 
-    });
+  // 🟢 LISTEN for the delete event from the server
+  const onMessageDeleted = (messageId: string) => {
+    setMessages((prevMessages) =>
+      prevMessages.map((msg) =>
+        msg._id === messageId 
+          ? { ...msg, isDeleted: true, content: "This message was deleted" } 
+          : msg
+      )
+    );
   };
 
-  socket.on(ChatEventEnum.MESSAGE_RECEIVED_EVENT, handleIncomingMessage);
+  socket.on(ChatEventEnum.MESSAGE_DELETE_EVENT, onMessageDeleted);
+
+  // 🚩 CLEANUP: Remove the listener when the component unmounts
   return () => {
-    socket.off(ChatEventEnum.MESSAGE_RECEIVED_EVENT, handleIncomingMessage);
+    socket.off(ChatEventEnum.MESSAGE_DELETE_EVENT, onMessageDeleted);
   };
-}, [socket, selectedChat?._id]);
+}, [socket, setMessages]);
+
+  // Requirement #1: Fixed Live Message Updates
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleIncomingMessage = (newMsg: any) => {
+      const incomingChatId = newMsg.chatId || newMsg.chat?._id || newMsg.chat;
+
+      // 1. Update messages if chat is open
+      setMessages((prev) => {
+        if (selectedChat?._id === incomingChatId) {
+          const isAlreadyPresent = prev.some((m) => m._id === newMsg._id);
+          return isAlreadyPresent ? prev : [...prev, newMsg];
+        }
+        return prev;
+      });
+
+      // 🚩 2. Update Sidebar for Receiver
+      setRecentChats((prev) => {
+        const chatIndex = prev.findIndex((c) => c._id === incomingChatId);
+
+        if (chatIndex !== -1) {
+          const updatedChat = {
+            ...prev[chatIndex],
+            latestMessage: newMsg, // Update the preview text
+            updatedAt: new Date().toISOString(), // Trigger re-sort to top
+          };
+          const otherChats = prev.filter((_, index) => index !== chatIndex);
+          return [updatedChat, ...otherChats];
+        } else {
+          // OPTIONAL: If chat doesn't exist in sidebar (first message from stranger)
+          // You might want to trigger a small re-fetch of chats here
+          return prev;
+        }
+      });
+    };
+
+    socket.on(ChatEventEnum.MESSAGE_RECEIVED_EVENT, handleIncomingMessage);
+    return () => {
+      socket.off(ChatEventEnum.MESSAGE_RECEIVED_EVENT, handleIncomingMessage);
+    };
+  }, [socket, selectedChat?._id]); // Ensure listener captures current chat state
+
   // Requirement #3: Online/Typing logic
   useEffect(() => {
     if (!socket) return;
@@ -215,28 +247,28 @@ useEffect(() => {
     }
   };
 
-const handleCreateGroup = async () => {
-  if (!groupName || selectedParticipants.length < 2) return;
-  try {
-    const response = await createAGroupChat({
-      chatName: groupName,
-      participants: selectedParticipants,
-      description: "Created in NexusChat"
-    });
+  const handleCreateGroup = async () => {
+    if (!groupName || selectedParticipants.length < 2) return;
+    try {
+      const response = await createAGroupChat({
+        chatName: groupName,
+        participants: selectedParticipants,
+        description: 'Created in NexusChat',
+      });
 
-    const newGroup = response.data.data;
+      const newGroup = response.data.data;
 
-    // 🚩 FIX: Update 'recentChats' instead of 'availableUsers'
-    setRecentChats((prev) => [newGroup, ...prev]);
-    setSelectedChat(newGroup);
-    setIsGroupModalOpen(false);
-    
-    setGroupName('');
-    setSelectedParticipants([]);
-  } catch (err) {
-    console.error("Group creation failed:", err);
-  }
-};
+      // 🚩 FIX: Update 'recentChats' instead of 'availableUsers'
+      setRecentChats((prev) => [newGroup, ...prev]);
+      setSelectedChat(newGroup);
+      setIsGroupModalOpen(false);
+
+      setGroupName('');
+      setSelectedParticipants([]);
+    } catch (err) {
+      console.error('Group creation failed:', err);
+    }
+  };
 
   const openUserChat = async (userId: string) => {
     try {
@@ -253,17 +285,31 @@ const handleCreateGroup = async () => {
     if (!typedMessage.trim() || !selectedChat) return;
 
     const messageContent = typedMessage;
+    const chatId = selectedChat._id; // Store ID before clearing
     setTypedMessage('');
 
     try {
-      socket?.emit(ChatEventEnum.STOP_TYPING_EVENT, selectedChat._id);
-      const response = await sendMessage(selectedChat._id, messageContent);
+      socket?.emit(ChatEventEnum.STOP_TYPING_EVENT, chatId);
+      const response = await sendMessage(chatId, messageContent);
+      const newMessage = response.data.data;
 
-      // 🚩 IMPORTANT: Only update local state if the socket listener
-      // isn't already handling the 'message received' for the sender.
-      // If your backend emits MESSAGE_RECEIVED_EVENT to the sender too,
-      // remove the line below to prevent duplicates.
-      setMessages((prev) => [...prev, response.data.data]);
+      // 1. Update the chat window
+      setMessages((prev) => [...prev, newMessage]);
+
+      // 🚩 2. Update the sidebar for the sender
+      setRecentChats((prev) => {
+        const chatIndex = prev.findIndex((c) => c._id === chatId);
+        if (chatIndex !== -1) {
+          const updatedChat = {
+            ...prev[chatIndex],
+            latestMessage: newMessage,
+            updatedAt: new Date().toISOString(), // Force move to top
+          };
+          const otherChats = prev.filter((_, index) => index !== chatIndex);
+          return [updatedChat, ...otherChats];
+        }
+        return prev;
+      });
     } catch (error) {
       console.error('Failed to send:', error);
     }
@@ -309,6 +355,21 @@ const handleCreateGroup = async () => {
   const otherUser = getOtherUser(selectedChat);
   const isUserOnline = onlineUsers.includes(otherUser?._id);
 
+ const handleDeleteMessage = async (messageId: string, type: 'me' | 'everyone') => {
+  try {
+    // 🚩 CHECK THIS LINE: Are you passing 'type' as the 3rd argument?
+    await deleteMessage(selectedChat._id, messageId, type);
+    
+    // If it's only for me, remove it from the local list immediately
+    if (type === 'me') {
+      setMessages((prev) => prev.filter((m) => m._id !== messageId));
+    }
+    
+    setOpenMenuId(null);
+  } catch (error) {
+    console.error("Delete failed", error);
+  }
+};
   return (
     <div
       className={`flex h-screen font-sans overflow-hidden transition-colors duration-500 ${theme.bgMain} ${theme.textMain}`}
@@ -329,7 +390,7 @@ const handleCreateGroup = async () => {
             active
             isDarkMode={isDarkMode}
           />
-          <SidebarIcon icon={<Users size={22} />} isDarkMode={isDarkMode} />
+          
           <button
             onClick={() => setIsDarkMode(!isDarkMode)}
             className={`p-2.5 rounded-xl ${isDarkMode ? 'text-amber-400' : 'text-blue-600'}`}
@@ -351,14 +412,30 @@ const handleCreateGroup = async () => {
       >
         <div className="p-6 pb-2">
           <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">Chats</h1>
-            <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">
+              {isNewChatView ? 'New chat' : 'Chats'}
+            </h1>
+
+            <div className="flex items-center gap-2">
+              {/* 🚩 The "New Chat" Icon Button */}
+              <button
+                onClick={() => setIsNewChatView(!isNewChatView)}
+                className={`p-2 rounded-full transition-all duration-200 ${
+                  isNewChatView
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'text-slate-400 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <UserPlus size={22} />
+              </button>
+
               <div className="relative">
-                <MoreVertical
-                  size={20}
-                  className="cursor-pointer opacity-60 hover:opacity-100"
+                <button
                   onClick={() => setShowMenu(!showMenu)}
-                />
+                  className="p-2 text-slate-400 hover:bg-white/10 hover:text-white rounded-full transition-all"
+                >
+                  <MoreVertical size={22} />
+                </button>
                 {showMenu && (
                   <div
                     className={`absolute right-0 mt-2 w-48 rounded-xl shadow-2xl py-2 z-50 border ${theme.border} ${isDarkMode ? 'bg-[#233138]' : 'bg-white'}`}
@@ -373,25 +450,25 @@ const handleCreateGroup = async () => {
                       <Users size={16} /> New group
                     </button>
                     <button
-                      className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 transition-colors ${
-                        isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-100'
-                      }`}
+                      className="w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 hover:bg-white/5"
                       onClick={handleLogout}
                     >
-                      <LogOut size={16} />
-                      Log out
+                      <LogOut size={16} /> Log out
                     </button>
                   </div>
                 )}
               </div>
             </div>
           </div>
+
           <div
             className={`flex items-center gap-2 mb-4 ${isDarkMode ? 'bg-black/20' : 'bg-slate-100'} p-3 rounded-xl border ${theme.border}`}
           >
             <Search size={18} className="opacity-40" />
             <input
-              placeholder="Search users..."
+              placeholder={
+                isNewChatView ? 'Search name or number' : 'Search users...'
+              }
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="bg-transparent outline-none text-sm w-full"
@@ -403,35 +480,73 @@ const handleCreateGroup = async () => {
           className="flex-1 overflow-y-auto px-2 space-y-1 no-scrollbar"
           style={scrollbarHideStyle}
         >
-          {/* 🚩 HYBRID LOGIC: If searching, show allUsers. If not, show recentChats */}
-          {(searchTerm ? allUsers : recentChats)
+          {/* 🚩 NEW GROUP BUTTON: Appears only in the "New Chat" discovery view */}
+          {isNewChatView && (
+            <div
+              onClick={() => {
+                setIsGroupModalOpen(true);
+                setIsNewChatView(false);
+              }}
+              className="p-4 rounded-2xl cursor-pointer flex gap-4 hover:bg-white/5 transition-all mb-2 border-b border-white/5"
+            >
+              <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center text-white shadow-lg">
+                <Users size={22} />
+              </div>
+              <div className="flex flex-col justify-center">
+                <h4 className="font-bold text-sm text-green-500">New group</h4>
+              </div>
+            </div>
+          )}
+
+          {/* 🚩 LIST RENDERING */}
+          {(isNewChatView || searchTerm ? allUsers : recentChats)
             .filter((item) => {
               const info = getChatDisplayInfo(item);
-              return info.name.toLowerCase().includes(searchTerm.toLowerCase());
+              const matchesSearch = info.name
+                .toLowerCase()
+                .includes(searchTerm.toLowerCase());
+
+              // 🚩 NEW LOGIC: Hide empty 1-on-1 chats in the "Recent" view
+              if (!isNewChatView && !searchTerm) {
+                // If it's NOT a group chat AND it has NO latest message, hide it
+                if (!item.isGroupChat && !item.latestMessage) {
+                  return false;
+                }
+              }
+
+              return matchesSearch;
             })
             .sort((a, b) => {
-              // Sort by latest activity
-              const timeA = new Date(a.updatedAt).getTime();
-              const timeB = new Date(b.updatedAt).getTime();
+              if (isNewChatView)
+                return (a.fullName || '').localeCompare(b.fullName || '');
+              const timeA = new Date(a.updatedAt || 0).getTime();
+              const timeB = new Date(b.updatedAt || 0).getTime();
               return timeB - timeA;
             })
             .map((item) => {
               const isActive = selectedChat?._id === item._id;
               const info = getChatDisplayInfo(item);
+
+              // 🟢 LOGIC FIX: In New Chat view, 'item' is the User object.
+              // We use item.fullName directly to avoid the "Nexus User" fallback.
+              const displayName = isNewChatView ? item.fullName : info.name;
+              const displayInitial = (displayName || '?')
+                .charAt(0)
+                .toUpperCase();
+
               const isLiveOnline =
-                !item.isGroupChat && onlineUsers.includes(info.id);
+                !item.isGroupChat && onlineUsers.includes(info.id || '');
 
               return (
                 <div
                   key={item._id}
                   onClick={() => {
-                    // If 'item' is a chat object (it has participants), just select it.
-                    // If 'item' is a raw User object (from allUsers search), call openUserChat.
                     if (item.participants || item.isGroupChat) {
                       setSelectedChat(item);
                     } else {
                       openUserChat(item._id);
                     }
+                    setIsNewChatView(false);
                   }}
                   className={`p-4 rounded-2xl cursor-pointer flex gap-4 transition-all ${
                     isActive ? theme.bgCardActive : 'hover:bg-white/5'
@@ -439,54 +554,65 @@ const handleCreateGroup = async () => {
                 >
                   {/* Avatar Section */}
                   <div className="relative">
-                    <div
-                      className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-md ${
-                        item.isGroupChat ? 'bg-indigo-600' : 'bg-blue-600'
-                      }`}
-                    >
-                      {item.isGroupChat ? <Users size={20} /> : info.initial}
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold bg-blue-600 shadow-inner">
+                      {displayInitial}
                     </div>
+
                     {isLiveOnline && (
-                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#0f172a]"></div>
+                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-[#0f172a] rounded-full"></div>
                     )}
                   </div>
 
-                  {/* Info Section */}
-                  <div className="flex-1 overflow-hidden">
-                    <div className="flex justify-between items-start">
-                      <h4
-                        className={`font-bold text-sm truncate ${isActive ? 'text-blue-500' : ''}`}
-                      >
-                        {info.name}
-                      </h4>
-                      {item.latestMessage && (
-                        <span className="text-[10px] opacity-30">
-                          {new Date(
-                            item.latestMessage.createdAt,
-                          ).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs truncate opacity-60">
-                      {item.latestMessage
-                        ? `${item.latestMessage.sender?.fullName || 'You'}: ${item.latestMessage.content}`
-                        : item.description || 'No messages yet'}
-                    </p>
-                  </div>
+                  {/* Text Section */}
+                  <div className="flex-1 flex flex-col justify-center overflow-hidden">
+  <div className="flex justify-between items-baseline">
+    <h4 className="font-bold text-sm truncate">
+      {displayName}
+    </h4>
+    
+    {/* 🚩 Show time only if not in "New Chat" view */}
+    {!isNewChatView && item.latestMessage && (
+      <span className="text-[10px] opacity-40 ml-2">
+        {new Date(item.latestMessage.createdAt).toLocaleTimeString([], { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: true 
+        })}
+      </span>
+    )}
+  </div>
+
+  <p className="text-xs opacity-60 truncate">
+    {isNewChatView ? (
+      // If searching for new users, show the @username
+      `@${item.username || item.handle || displayName.toLowerCase().replace(/\s+/g, '_')}`
+    ) : (
+      // If in recent chats, show the actual message content
+      <>
+        {item.latestMessage ? (
+          <span>
+            {/* If it's a group, show the sender name: */}
+            {item.isGroupChat && `${item.latestMessage.sender.fullName.split(' ')[0]}: `}
+            {/* Show message text or a placeholder for media */}
+            {item.latestMessage.text || (item.latestMessage.image ? "📷 Photo" : "File")}
+          </span>
+        ) : (
+          "Tap to start chatting"
+        )}
+      </>
+    )}
+  </p>
+</div>
                 </div>
               );
             })}
 
-          {/* 🚩 Empty State UI: Shows only when history is empty and user isn't searching */}
-          {!searchTerm && recentChats.length === 0 && (
+          {!searchTerm && !isNewChatView && recentChats.length === 0 && (
             <div className="mt-10 text-center px-6 opacity-40">
               <p className="text-xs leading-relaxed">
                 No recent chats yet.
                 <br />
-                Search for a username above to start a conversation!
+                Click the + icon to find your first contact!
               </p>
             </div>
           )}
@@ -537,41 +663,91 @@ const handleCreateGroup = async () => {
               style={scrollbarHideStyle}
             >
               {messages.map((msg) => {
-                const me = JSON.parse(localStorage.getItem('user') || '{}');
-                const isMe =
-                  msg.senderId === me._id || msg.sender?._id === me._id;
-                return (
-                  <div
-                    key={msg._id}
-                    className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[70%] p-4 rounded-2xl shadow-sm ${isMe ? `${theme.bubbleMe} text-white rounded-tr-none shadow-blue-500/10` : `${theme.bubbleThem} ${theme.border} ${theme.textMain} rounded-tl-none`}`}
-                    >
-                      {/* Show sender name in group chats */}
-                      {selectedChat.isGroupChat && !isMe && (
-                        <p className="text-[10px] font-bold text-blue-400 mb-1">
-                          {msg.sender?.fullName || 'Member'}
-                        </p>
-                      )}
-                      <p className="text-[15px] leading-relaxed">
-                        {msg.content}
-                      </p>
-                      <div className="flex items-center justify-end gap-1.5 opacity-40 mt-1">
-                        <span className="text-[10px] font-medium">
-                          {new Date(msg.createdAt).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                        {isMe && (
-                          <CheckCheck size={14} className="text-blue-200" />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+  const me = JSON.parse(localStorage.getItem('user') || '{}');
+  const isMe = msg.senderId === me._id || msg.sender?._id === me._id;
+  const isMenuOpen = openMenuId === msg._id;
+  const isDeleted = msg.isDeleted;
+
+  return (
+    <div
+      key={msg._id}
+      className={`flex group ${isMe ? 'justify-end' : 'justify-start'} relative mb-4 px-4`}
+      onMouseLeave={() => setOpenMenuId(null)}
+    >
+      <div
+        className={`relative max-w-[45%] p-3 rounded-2xl shadow-sm transition-all ${
+          isMe 
+            ? `${theme.bubbleMe} text-white rounded-tr-none shadow-blue-500/10` 
+            : `${theme.bubbleThem} ${theme.border} ${theme.textMain} rounded-tl-none`
+        }`}
+      >
+        {/* SENDER NAME (Groups) */}
+        {selectedChat.isGroupChat && !isMe && (
+          <p className="text-[11px] font-bold text-blue-400 mb-1 truncate">
+            {msg.sender?.fullName || 'Member'}
+          </p>
+        )}
+
+        {/* HOVER ARROW (Hide if message is deleted) */}
+        {!isDeleted && (
+          <div 
+            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 p-1 rounded-full bg-black/10 hover:bg-black/20"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpenMenuId(isMenuOpen ? null : msg._id);
+            }}
+          >
+            <ChevronDown size={14} />
+          </div>
+        )}
+
+        {/* 🚩 MESSAGE CONTENT: Styled to match your reference image */}
+        {isDeleted ? (
+          <div className="flex items-center gap-2 py-1 pr-6 opacity-50">
+            <Ban size={14} className="shrink-0" />
+            <p className="text-[14px] italic leading-tight">
+              This message was deleted
+            </p>
+          </div>
+        ) : (
+          <p className="text-[14.5px] leading-tight break-words whitespace-pre-wrap pr-4">
+            {msg.content}
+          </p>
+        )}
+        
+        {/* TIME & STATUS */}
+        <div className="flex items-center justify-end gap-1 opacity-60 mt-1">
+          <span className="text-[10px]">
+            {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {isMe && !isDeleted && (
+            <CheckCheck size={14} className="text-blue-200" />
+          )}
+        </div>
+
+        {/* DELETE DROPDOWN */}
+        {isMenuOpen && (
+          <div className={`absolute top-8 ${isMe ? 'right-0' : 'left-0'} z-50 w-40 bg-[#1e293b] border border-white/10 rounded-xl shadow-2xl p-1`}>
+             <button 
+              onClick={() => handleDeleteMessage(msg._id, 'me')}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 rounded-lg"
+            >
+              <Trash2 size={13} /> Delete for me
+            </button>
+            {isMe && (
+              <button 
+                onClick={() => handleDeleteMessage(msg._id, 'everyone')}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 rounded-lg"
+              >
+                <Users size={13} /> Delete for everyone
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+})}
               <div ref={scrollRef} />
             </div>
 

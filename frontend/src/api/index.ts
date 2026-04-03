@@ -37,3 +37,8 @@ export const createAGroupChat = (data: {
   return API.post("/chats/group", data, { withCredentials: true });
 };
 
+// 5. Delete a message (Type: 'me' or 'everyone')
+export const deleteMessage = (chatId: string, messageId: string, deleteType: string) => 
+  API.delete(`/messages/${chatId}/${messageId}`, { 
+    data: { deleteType } // This MUST be inside a 'data' key
+  });
