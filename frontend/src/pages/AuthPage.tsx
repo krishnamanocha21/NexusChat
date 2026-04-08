@@ -17,11 +17,6 @@ const AuthPage: React.FC = () => {
   const brandLime = '#bef264';
   const logoUrl = '/2.png';
 
-  const socialIcons = [
-    { name: 'Facebook', icon: '📷' },
-    { name: 'Google', icon: '🐦' },
-    { name: 'LinkedIn', icon: '🎥' },
-  ];
 
   // Logic for Sign In
   const handleSignIn = async (e: React.FormEvent) => {

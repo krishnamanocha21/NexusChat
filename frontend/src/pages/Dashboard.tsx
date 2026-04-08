@@ -2,14 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../context/SocketContext';
 import {
   MessageSquare,
-  Phone,
   Users,
   Sun,
   Moon,
   Settings,
   Send,
   Search,
-  Video,
   ChevronDown,
   Trash2,
   MoreVertical,
@@ -34,7 +32,6 @@ import { ChatEventEnum } from '../constants';
 import { useNavigate } from 'react-router-dom';
 
 const Dashboard: React.FC = () => {
-  const [availableUsers, setAvailableUsers] = useState<any[]>([]);
   const [selectedChat, setSelectedChat] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [typedMessage, setTypedMessage] = useState('');

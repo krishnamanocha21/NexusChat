@@ -4,7 +4,7 @@ import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
-import { SocketProvider } from './context/SocketContext';
+
 
 // This wrapper component handles showing/hiding the Navbar
 const AppContent: React.FC = () => {
