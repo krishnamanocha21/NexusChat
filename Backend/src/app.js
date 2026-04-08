@@ -9,7 +9,8 @@ const app = express();
 
 // 1. CORS at the VERY TOP
 app.use(cors({
-    origin: "http://localhost:5174", // Double-check this matches your browser URL!
+    // Replace the hardcoded string with the environment variable
+    origin: process.env.CORS_ORIGIN, 
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
 }));

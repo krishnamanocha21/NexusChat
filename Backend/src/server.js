@@ -13,12 +13,13 @@ import { Server } from "socket.io";
 import { initializeSocketIO } from "./socket/index.js";
 
 const httpServer =createServer(app);
-const io =new Server(httpServer,{
-    pingTimeout:60000,
-    cors:{
-        origin: "http://localhost:5174", // Replace with  React/Vite port
-    methods: ["GET", "POST"],
-        credentials:true,
+const io = new Server(httpServer, {
+    pingTimeout: 60000,
+    cors: {
+        // Change the line below to use process.env
+        origin: process.env.CORS_ORIGIN, 
+        methods: ["GET", "POST"],
+        credentials: true,
     },
 });
 
