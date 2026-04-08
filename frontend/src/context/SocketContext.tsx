@@ -10,7 +10,7 @@ const SocketContext = createContext<Socket | null>(null);
 //It tells TypeScript that the children can be anything valid in React—a single HTML tag, another React component, a string of text, or even an array of multiple components
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
-const SOCKET_URL = "http://localhost:4000"; // Or whatever port your backend is on
+const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000"; // Or whatever port your backend is on
   //Establishing the Connection (useEffect)
   useEffect(() => {
     // Replace with your backend URL
