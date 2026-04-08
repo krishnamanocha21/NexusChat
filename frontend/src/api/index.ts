@@ -1,8 +1,12 @@
 import axios from 'axios';
 
+const BASE_URL = import.meta.env.VITE_SERVER_URL 
+  ? `${import.meta.env.VITE_SERVER_URL}/api/v1` 
+  : 'http://localhost:4000/api/v1';
+
 const API = axios.create({
-  baseURL: 'http://localhost:4000/api/v1', // Update with your server port
-  withCredentials: true, // Crucial for sending/receiving cookies (Refresh tokens)
+  baseURL: BASE_URL,
+  withCredentials: true,
 });
 
 //the data parameter contains the {email and password},axios  will convert this automatically to the json format;
