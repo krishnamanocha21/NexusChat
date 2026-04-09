@@ -24,6 +24,9 @@ app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(express.static("public")); 
 
 // 4. Routes
+app.get("/api/v1/test", (req, res) => {
+    res.json({ message: "Backend is reachable and routes are working!" });
+});
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/chats", chatRouter);
 app.use("/api/v1/messages", messageRouter);
