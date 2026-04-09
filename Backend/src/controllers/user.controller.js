@@ -92,9 +92,13 @@ export const loginUser = asyncHandler(async (req, res) => {
     const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
 
     const options = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-    };
+    httpOnly: true,
+    // On Render/Vercel (Production), this MUST be true. 
+    // If you haven't set NODE_ENV in Render, use true directly.
+    secure: true, 
+    // This is the "Magic" fix for 401 on Cross-Domain apps
+    sameSite: 'None', 
+};
 
     return res
         .status(200)
@@ -117,26 +121,19 @@ export const loginUser = asyncHandler(async (req, res) => {
 export const logoutUser = asyncHandler(async(req, res) => {
     
     await User.findByIdAndUpdate(
-        req.user._id,
-        {
-            $unset:{
-                refreshToken:1
-            }
+    req.user._id,
+    { $unset: { refreshToken: 1 } },
+    { new: true } // This is enough for Mongoose
+);
 
-        },
-        {
-            new:true
-        },
-        {
-            // 🚩 THE FIX: Replace 'new: true' with this
-            returnDocument: 'after' 
-        }
-    )
-
-    const options ={
-        httpOnly:true ,
-        secure: process.env.NODE_ENV === "production",
-    }
+    const options = {
+    httpOnly: true,
+    // On Render/Vercel (Production), this MUST be true. 
+    // If you haven't set NODE_ENV in Render, use true directly.
+    secure: true, 
+    // This is the "Magic" fix for 401 on Cross-Domain apps
+    sameSite: 'None', 
+};
 
     return res
     .status(200)
